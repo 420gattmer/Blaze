@@ -1,0 +1,2005 @@
+# BATTLEFIELD FRENZY: STONER EDITION - KOMPLETT KODÖVERSIKT
+
+## PROJEKTSTRUKTUR
+```
+/client
+  /public
+    /models                   # 3D-modeller (GLB-format)
+      /pistol.glb             # Standard startvapen
+      /blunt_launcher.glb     # Cannabis-inspirerad raketgevär
+      /vape_smg.glb           # Automatvapen designat som vaporizer
+      /bong_shotgun.glb       # Hagelgevär designat som vattenpipa
+      /fps_hands.glb          # Händer som håller vapnet i FPS-vy
+      /street_scene.glb       # Post-apokalyptisk gatumiljö med cannabisreferenser
+      /cannabis_plant.glb     # Cannabisväxt för dekoration i miljön
+      /health_pack.glb        # Hälsopaket i form av cannabis-edible
+      /ammo_box.glb           # Ammunitionslåda i form av rullpapper
+      /power_up.glb           # Svävande cannabisblad power-up
+    /textures                 # Texturer för miljön
+    /sounds                   # Ljudeffekter och musik
+  /src
+    /components
+      /game
+        /FPSPlayer.tsx        # Huvudkomponent för spelaren (händer, vapen, rörelse)
+        /DarkEnvironment.tsx  # Miljökomponent med cannabis-tema
+        /ZombieEnemy.tsx      # Fienderendering och beteende
+      /ui
+        /FPSOverlay.tsx       # HUD med hälsa, ammunition, score
+        /DownloadButton.tsx   # Knapp för nedladdning av dokumentation
+    /hooks
+      /use-is-mobile.tsx      # Hook för att detektera mobilenheter
+    /lib
+      /types.ts              # Typedefinitioner för spelet
+      /utils.ts              # Hjälpfunktioner
+      /stores
+        /usePlayerStore.tsx  # Zustand store för spelardata
+    /classes
+      /Enemy.ts              # Fiendklasser och beteendelogik
+      /Weapon.ts             # Vapensystem och projektiler 
+      /PowerUp.ts            # Power-ups och effekter
+    /App.tsx                 # Huvud-app komponent
+    /main.tsx                # Ingångspunkt
+/server
+  /index.ts                  # Express-server
+  /routes.ts                 # Endpoints
+  /storage.ts                # Databashantering
+  /vite.ts                   # Vite-konfiguration
+/shared
+  /schema.ts                 # Delat schema för front/backend
+```
+
+## KÄLLKOD FÖR HUVUDFILER
+
+### 1. client/src/lib/types.ts
+```typescript
+export enum Controls {
+  forward = "forward",
+  backward = "backward",
+  leftward = "leftward",
+  rightward = "rightward",
+  shoot = "shoot",
+  reload = "reload",
+  weaponSwitch = "weaponSwitch"
+}
+
+export type Vector3 = [number, number, number];
+
+export type GameSettings = {
+  difficulty: "easy" | "normal" | "hard";
+  enemySpeedMultiplier: number;
+  enemyHealthMultiplier: number;
+  playerDamageMultiplier: number;
+};
+
+export type CollisionBox = {
+  min: Vector3;
+  max: Vector3;
+}
+
+export enum EnemyType {
+  Normal = "normal",
+  Fast = "fast",
+  Tank = "tank",
+  Explosive = "explosive",
+  Stealth = "stealth",    // New type: Can become invisible
+  Summoner = "summoner",  // New type: Can summon reinforcements
+  Boss = "boss"
+}
+
+export enum WeaponType {
+  Pistol = "pistol",
+  Shotgun = "shotgun",
+  Automatic = "automatic",
+  RocketLauncher = "rocketLauncher",
+  BlackHoleGun = "blackHoleGun"  // New legendary weapon that creates a black hole
+}
+
+export type WeaponStats = {
+  type: WeaponType;
+  name: string;
+  damage: number;
+  fireRate: number; // shots per second
+  clipSize: number;
+  reloadTime: number; // seconds
+  range: number;
+  projectileSpeed: number;
+  projectileSize: number;
+  isAutomatic: boolean;
+  spread: number; // for shotgun
+  projectileCount: number; // for shotgun
+  explosionRadius?: number; // for rocket launcher
+}
+
+export type EnemyStats = {
+  type: EnemyType;
+  health: number;
+  speed: number;
+  damage: number;
+  attackRange: number;
+  attackRate: number; // attacks per second
+  scoreValue: number;
+  color: string;
+  explosionRadius?: number; // for explosive enemies
+  explosionDamage?: number; // for explosive enemies
+}
+```
+
+### 2. client/src/lib/stores/usePlayerStore.tsx
+```typescript
+import { create } from 'zustand';
+import { Vector3 } from '../types';
+
+type PlayerState = {
+  position: Vector3;
+  direction: Vector3;
+  health: number;
+  maxHealth: number;
+  isMoving: boolean;
+  isShooting: boolean;
+  isReloading: boolean;
+  activePowerUp: string | null;
+  powerUpTimeLeft: number;
+  score: number;
+  setPosition: (position: Vector3) => void;
+  setDirection: (direction: Vector3) => void;
+  setHealth: (health: number) => void;
+  takeDamage: (amount: number) => boolean;
+  heal: (amount: number) => void;
+  setIsMoving: (isMoving: boolean) => void;
+  setIsShooting: (isShooting: boolean) => void;
+  setIsReloading: (isReloading: boolean) => void;
+  setPowerUp: (powerUp: string | null, duration: number) => void;
+  updatePowerUpTime: (delta: number) => void;
+  addScore: (amount: number) => void;
+  resetPlayer: () => void;
+};
+
+export const usePlayerStore = create<PlayerState>((set) => ({
+  position: [0, 1, 0],
+  direction: [0, 0, -1],
+  health: 100,
+  maxHealth: 100,
+  isMoving: false,
+  isShooting: false,
+  isReloading: false,
+  activePowerUp: null,
+  powerUpTimeLeft: 0,
+  score: 0,
+  
+  setPosition: (position) => set({ position }),
+  setDirection: (direction) => set({ direction }),
+  setHealth: (health) => set({ health: Math.min(health, 100) }),
+  
+  takeDamage: (amount) => {
+    let isDead = false;
+    set((state) => {
+      const newHealth = Math.max(0, state.health - amount);
+      isDead = newHealth <= 0;
+      return { health: newHealth };
+    });
+    return isDead;
+  },
+  
+  heal: (amount) => set((state) => ({ 
+    health: Math.min(state.maxHealth, state.health + amount) 
+  })),
+  
+  setIsMoving: (isMoving) => set({ isMoving }),
+  setIsShooting: (isShooting) => set({ isShooting }),
+  setIsReloading: (isReloading) => set({ isReloading }),
+  
+  setPowerUp: (powerUp, duration) => set({
+    activePowerUp: powerUp,
+    powerUpTimeLeft: duration
+  }),
+  
+  updatePowerUpTime: (delta) => set((state) => {
+    if (!state.activePowerUp || state.powerUpTimeLeft <= 0) {
+      return { activePowerUp: null, powerUpTimeLeft: 0 };
+    }
+    
+    const newTimeLeft = state.powerUpTimeLeft - delta;
+    if (newTimeLeft <= 0) {
+      return { activePowerUp: null, powerUpTimeLeft: 0 };
+    }
+    
+    return { powerUpTimeLeft: newTimeLeft };
+  }),
+  
+  addScore: (amount) => set((state) => ({ score: state.score + amount })),
+  
+  resetPlayer: () => set({
+    position: [0, 1, 0],
+    direction: [0, 0, -1],
+    health: 100,
+    isMoving: false,
+    isShooting: false,
+    isReloading: false,
+    activePowerUp: null,
+    powerUpTimeLeft: 0,
+    score: 0
+  })
+}));
+```
+
+### 3. client/src/classes/Enemy.ts
+```typescript
+import { Vector3, EnemyType, EnemyStats } from '../lib/types';
+
+// Standardvärden för fiender
+export const ENEMY_STATS: Record<EnemyType, EnemyStats> = {
+  [EnemyType.Normal]: {
+    type: EnemyType.Normal,
+    health: 100,
+    speed: 1.2,
+    damage: 10,
+    attackRange: 1.5,
+    attackRate: 1, // attacker per sekund
+    scoreValue: 100,
+    color: '#5a5a5a', // Gråaktig zombie
+    explosionRadius: 0,
+    explosionDamage: 0
+  },
+  [EnemyType.Fast]: {
+    type: EnemyType.Fast,
+    health: 60,
+    speed: 2.5,
+    damage: 8,
+    attackRange: 1.2,
+    attackRate: 1.5,
+    scoreValue: 150,
+    color: '#2d5a3a', // Mörkgrön (paranoid)
+    explosionRadius: 0,
+    explosionDamage: 0
+  },
+  [EnemyType.Tank]: {
+    type: EnemyType.Tank,
+    health: 250,
+    speed: 0.8,
+    damage: 15,
+    attackRange: 1.8,
+    attackRate: 0.5,
+    scoreValue: 200,
+    color: '#664400', // Brun tank
+    explosionRadius: 0,
+    explosionDamage: 0
+  },
+  [EnemyType.Explosive]: {
+    type: EnemyType.Explosive,
+    health: 80,
+    speed: 1.5,
+    damage: 5,
+    attackRange: 0.5,
+    attackRate: 0.2,
+    scoreValue: 180,
+    color: '#ff6600', // Röd/orange för explosiv
+    explosionRadius: 5,
+    explosionDamage: 50
+  },
+  [EnemyType.Stealth]: {
+    type: EnemyType.Stealth,
+    health: 70,
+    speed: 1.7,
+    damage: 12,
+    attackRange: 1.0,
+    attackRate: 1.2,
+    scoreValue: 220,
+    color: '#444488', // Blåaktig för stealth
+    explosionRadius: 0,
+    explosionDamage: 0
+  },
+  [EnemyType.Summoner]: {
+    type: EnemyType.Summoner,
+    health: 120,
+    speed: 0.9,
+    damage: 8,
+    attackRange: 10, // Längre räckvidd för summoning
+    attackRate: 0.3,
+    scoreValue: 250,
+    color: '#8844aa', // Lila för summoner
+    explosionRadius: 0,
+    explosionDamage: 0
+  },
+  [EnemyType.Boss]: {
+    type: EnemyType.Boss,
+    health: 600,
+    speed: 0.6,
+    damage: 25,
+    attackRange: 2.0,
+    attackRate: 0.3,
+    scoreValue: 500,
+    color: '#4d7b00', // Cannabisgrön för boss
+    explosionRadius: 0,
+    explosionDamage: 0
+  }
+};
+
+// Huvudklass för fiender
+export class Enemy {
+  id: string;
+  type: EnemyType;
+  position: Vector3;
+  health: number;
+  speed: number;
+  damage: number;
+  attackRange: number;
+  attackRate: number;
+  scoreValue: number;
+  color: string;
+  explosionRadius?: number;
+  explosionDamage?: number;
+  
+  // Tillstånd
+  lastAttackTime: number = 0;
+  lastShootTime: number = 0;
+  
+  // Rörelseegenskaper
+  movementPattern: "direct" | "zigzag" | "circle" = "direct";
+  movementOffset: number = 0;
+  
+  constructor(id: string, type: EnemyType, position: Vector3, waveNumber: number = 1) {
+    this.id = id;
+    this.type = type;
+    this.position = [...position]; // Klona för att undvika referenser
+    
+    // Hämta basstatistik för fiendtypen
+    const stats = ENEMY_STATS[type];
+    
+    // Tillämpa wave scaling (fiender blir starkare för varje våg)
+    const waveScaling = 1 + (waveNumber - 1) * 0.1; // 10% ökning per våg
+    
+    this.health = stats.health * waveScaling;
+    this.speed = stats.speed;
+    this.damage = stats.damage * waveScaling;
+    this.attackRange = stats.attackRange;
+    this.attackRate = stats.attackRate;
+    this.scoreValue = stats.scoreValue;
+    this.color = stats.color;
+    this.explosionRadius = stats.explosionRadius;
+    this.explosionDamage = stats.explosionDamage;
+    
+    // Sätt slumpmässigt rörelsemönster för vissa fiender
+    if (type === EnemyType.Fast) {
+      this.movementPattern = Math.random() > 0.5 ? "zigzag" : "direct";
+    } else if (type === EnemyType.Stealth) {
+      this.movementPattern = "zigzag";
+    } else if (type === EnemyType.Summoner) {
+      this.movementPattern = "circle";
+    }
+  }
+  
+  // Rörelse mot spelaren
+  moveTowardsPlayer(playerPosition: Vector3, delta: number): Vector3 {
+    const direction = this.calculateMovementDirection(playerPosition);
+    
+    // Applicera rörelse baserat på hastighet och delta
+    const distanceToMove = this.speed * delta;
+    
+    // Uppdatera position
+    const newPosition: Vector3 = [
+      this.position[0] + direction[0] * distanceToMove,
+      this.position[1], // Behåll samma höjd
+      this.position[2] + direction[2] * distanceToMove,
+    ];
+    
+    // Uppdatera positionen i instansen
+    this.position = newPosition;
+    
+    // Uppdatera movement offset för rörelsemönster
+    this.movementOffset += delta * 2;
+    
+    return newPosition;
+  }
+  
+  // Beräkna rörelseriktning baserat på mönster
+  calculateMovementDirection(playerPosition: Vector3): Vector3 {
+    // Grundläggande riktning mot spelaren
+    const dx = playerPosition[0] - this.position[0];
+    const dz = playerPosition[2] - this.position[2];
+    const distance = Math.sqrt(dx * dx + dz * dz);
+    
+    // Normalisera basvektorn
+    const baseDirection: Vector3 = [
+      dx / distance,
+      0,
+      dz / distance
+    ];
+    
+    // Applicera olika rörelsemönster
+    switch (this.movementPattern) {
+      case "zigzag":
+        // Beräkna en vektor som är vinkelrät mot riktningen mot spelaren
+        const perpVector: Vector3 = [baseDirection[2], 0, -baseDirection[0]];
+        // Oscillera sidledes
+        const zigzagAmount = Math.sin(this.movementOffset * 3) * 0.7;
+        return [
+          baseDirection[0] + perpVector[0] * zigzagAmount,
+          0,
+          baseDirection[2] + perpVector[2] * zigzagAmount
+        ];
+        
+      case "circle":
+        // Cirkulera runt spelaren på avstånd
+        if (distance < 10) {
+          // Beräkna en vektor för cirkulär rörelse
+          const circleVector: Vector3 = [
+            -baseDirection[2], // Vinkelrät
+            0,
+            baseDirection[0]
+          ];
+          // Blanda cirkulär rörelse med inåtgående rörelse om för långt bort
+          const inwardsFactor = distance < 5 ? 0 : 0.3;
+          return [
+            circleVector[0] + baseDirection[0] * inwardsFactor,
+            0,
+            circleVector[2] + baseDirection[2] * inwardsFactor
+          ];
+        } else {
+          // Om för långt bort, gå direkt mot spelaren
+          return baseDirection;
+        }
+        
+      case "direct":
+      default:
+        return baseDirection;
+    }
+  }
+  
+  // Kontrollera om fienden kan attackera baserat på attackrate
+  canAttack(currentTime: number): boolean {
+    return currentTime - this.lastAttackTime > (1000 / this.attackRate);
+  }
+  
+  // Utför en attack
+  attack(currentTime: number): number {
+    if (this.canAttack(currentTime)) {
+      this.lastAttackTime = currentTime;
+      return this.damage;
+    }
+    return 0;
+  }
+  
+  // Ta skada och returnera true om fienden dog
+  takeDamage(amount: number): boolean {
+    this.health -= amount;
+    return this.health <= 0;
+  }
+  
+  // Explodera (för explosiva fiender)
+  explode(): { radius: number, damage: number } | null {
+    if (this.type === EnemyType.Explosive && this.explosionRadius && this.explosionDamage) {
+      return {
+        radius: this.explosionRadius,
+        damage: this.explosionDamage
+      };
+    }
+    return null;
+  }
+  
+  // Specialattack för vissa fiendtyper (projektil, AoE, etc)
+  specialAttack(playerPosition: Vector3): { type: "projectile" | "aoe", data: any } | null {
+    const currentTime = Date.now();
+    
+    switch (this.type) {
+      case EnemyType.Summoner:
+        // Summonern kan kalla in förstärkningar
+        if (currentTime - this.lastShootTime > 5000) { // Var 5:e sekund
+          this.lastShootTime = currentTime;
+          return {
+            type: "aoe",
+            data: {
+              position: [...this.position],
+              radius: 3,
+              effectType: "summon",
+              amount: 2 // Summonera 2 fiender
+            }
+          };
+        }
+        break;
+        
+      case EnemyType.Boss:
+        // Bossen kan skjuta projektiler
+        if (currentTime - this.lastShootTime > 3000) { // Var 3:e sekund
+          this.lastShootTime = currentTime;
+          
+          // Beräkna riktning mot spelaren
+          const dx = playerPosition[0] - this.position[0];
+          const dz = playerPosition[2] - this.position[2];
+          const dist = Math.sqrt(dx*dx + dz*dz);
+          const dir: Vector3 = [dx/dist, 0, dz/dist];
+          
+          // Skapa tre projektiler med olika vinklar
+          const projectiles = [];
+          for (let i = -1; i <= 1; i++) {
+            // Rotera riktningen lite för varje projektil
+            const angle = i * Math.PI / 12; // +/- 15 grader
+            const rotatedDir: Vector3 = [
+              dir[0] * Math.cos(angle) - dir[2] * Math.sin(angle),
+              0,
+              dir[0] * Math.sin(angle) + dir[2] * Math.cos(angle)
+            ];
+            
+            projectiles.push({
+              position: [...this.position],
+              direction: rotatedDir,
+              speed: 5,
+              damage: this.damage / 2
+            });
+          }
+          
+          return {
+            type: "projectile",
+            data: {
+              projectiles
+            }
+          };
+        }
+        break;
+    }
+    
+    return null;
+  }
+}
+```
+
+### 4. client/src/classes/PowerUp.ts
+```typescript
+import { Vector3 } from '../lib/types';
+
+export enum PowerUpType {
+  MindBender = "mindBender",
+  GanjaStorm = "ganjaStorm",
+  TranscendenceMode = "transcendenceMode"
+}
+
+export type PowerUpEffect = {
+  // Visual effects
+  rgbShift?: number;
+  colorTint?: [number, number, number]; // RGB values
+  bloomIntensity?: number;
+  distortionIntensity?: number;
+  
+  // Gameplay effects
+  playerSpeedMultiplier?: number;
+  playerDamageMultiplier?: number;
+  playerDamageReduction?: number;
+  enemySpeedMultiplier?: number;
+  enemyConfusion?: boolean;
+};
+
+export type PowerUpConfig = {
+  type: PowerUpType;
+  name: string;
+  description: string;
+  duration: number; // in seconds
+  effects: PowerUpEffect;
+  color: string;
+  icon: string;
+  rarity: "common" | "uncommon" | "rare" | "legendary";
+  soundEffects?: {
+    activate?: string;
+    active?: string;
+    deactivate?: string;
+  };
+};
+
+export const POWER_UP_CONFIGS: Record<PowerUpType, PowerUpConfig> = {
+  [PowerUpType.MindBender]: {
+    type: PowerUpType.MindBender,
+    name: "Mind Bender",
+    description: "Förvirrar fiender och får dem att röra sig slumpmässigt",
+    duration: 10,
+    effects: {
+      rgbShift: 0.02,
+      colorTint: [0.9, 0.4, 0.8],
+      distortionIntensity: 0.3,
+      enemyConfusion: true,
+      playerSpeedMultiplier: 1.2
+    },
+    color: "#ff44bb",
+    icon: "brain",
+    rarity: "uncommon",
+    soundEffects: {
+      activate: "sounds/mind_bender_activate.mp3",
+      active: "sounds/mind_bender_loop.mp3"
+    }
+  },
+  
+  [PowerUpType.GanjaStorm]: {
+    type: PowerUpType.GanjaStorm,
+    name: "Ganja Storm",
+    description: "Orsakar konstant skada på alla fiender i närheten",
+    duration: 8,
+    effects: {
+      bloomIntensity: 0.8,
+      colorTint: [0.3, 0.8, 0.3],
+      playerDamageMultiplier: 1.5
+    },
+    color: "#44ff44",
+    icon: "leaf",
+    rarity: "rare",
+    soundEffects: {
+      activate: "sounds/ganja_storm_activate.mp3",
+      active: "sounds/ganja_storm_loop.mp3"
+    }
+  },
+  
+  [PowerUpType.TranscendenceMode]: {
+    type: PowerUpType.TranscendenceMode,
+    name: "Transcendence Mode",
+    description: "Tillfällig oövervinnerlighet och ökad hastighet",
+    duration: 5,
+    effects: {
+      rgbShift: 0.05,
+      bloomIntensity: 1.0,
+      colorTint: [0.8, 0.9, 0.3],
+      distortionIntensity: 0.5,
+      playerSpeedMultiplier: 1.5,
+      playerDamageReduction: 1.0 // 100% damage reduction (invincible)
+    },
+    color: "#ffff00",
+    icon: "star",
+    rarity: "legendary",
+    soundEffects: {
+      activate: "sounds/transcendence_activate.mp3",
+      active: "sounds/transcendence_loop.mp3",
+      deactivate: "sounds/transcendence_deactivate.mp3"
+    }
+  }
+};
+
+export class PowerUp {
+  type: PowerUpType;
+  position: Vector3;
+  config: PowerUpConfig;
+  creationTime: number;
+  
+  constructor(type: PowerUpType, position: Vector3) {
+    this.type = type;
+    this.position = [...position];
+    this.config = POWER_UP_CONFIGS[type];
+    this.creationTime = Date.now();
+  }
+  
+  // Animering för rotation
+  getRotation(currentTime: number): number {
+    const elapsedTime = (currentTime - this.creationTime) / 1000;
+    return elapsedTime * Math.PI; // en rotation per sekund
+  }
+  
+  // Animering för svävande höjd
+  getHeight(currentTime: number): number {
+    const elapsedTime = (currentTime - this.creationTime) / 1000;
+    return this.position[1] + Math.sin(elapsedTime * 2) * 0.2; // Oscillera upp och ner +/- 0.2 enheter
+  }
+  
+  // Hämta visuella effekter
+  getVisualEffects(): PowerUpEffect {
+    const effects: PowerUpEffect = {};
+    
+    if (this.config.effects.rgbShift) {
+      effects.rgbShift = this.config.effects.rgbShift;
+    }
+    
+    if (this.config.effects.colorTint) {
+      effects.colorTint = this.config.effects.colorTint;
+    }
+    
+    if (this.config.effects.bloomIntensity) {
+      effects.bloomIntensity = this.config.effects.bloomIntensity;
+    }
+    
+    if (this.config.effects.distortionIntensity) {
+      effects.distortionIntensity = this.config.effects.distortionIntensity;
+    }
+    
+    return effects;
+  }
+  
+  // Hämta speleffekter
+  getGameplayEffects(): PowerUpEffect {
+    const effects: PowerUpEffect = {};
+    
+    if (this.config.effects.playerSpeedMultiplier) {
+      effects.playerSpeedMultiplier = this.config.effects.playerSpeedMultiplier;
+    }
+    
+    if (this.config.effects.playerDamageMultiplier) {
+      effects.playerDamageMultiplier = this.config.effects.playerDamageMultiplier;
+    }
+    
+    if (this.config.effects.playerDamageReduction) {
+      effects.playerDamageReduction = this.config.effects.playerDamageReduction;
+    }
+    
+    if (this.config.effects.enemySpeedMultiplier) {
+      effects.enemySpeedMultiplier = this.config.effects.enemySpeedMultiplier;
+    }
+    
+    if (this.config.effects.enemyConfusion) {
+      effects.enemyConfusion = this.config.effects.enemyConfusion;
+    }
+    
+    return effects;
+  }
+}
+```
+
+### 5. client/src/classes/Weapon.ts
+```typescript
+import { Vector3, WeaponType, WeaponStats } from '../lib/types';
+
+// Standardvärden för olika vapentyper
+export const WEAPON_STATS: Record<WeaponType, WeaponStats> = {
+  [WeaponType.Pistol]: {
+    type: WeaponType.Pistol,
+    name: "Cannabis Pistol",
+    damage: 25,
+    fireRate: 2, // skott per sekund
+    clipSize: 12,
+    reloadTime: 1.5, // sekunder
+    range: 50,
+    projectileSpeed: 30,
+    projectileSize: 0.1,
+    isAutomatic: false,
+    spread: 0.02,
+    projectileCount: 1
+  },
+  
+  [WeaponType.Shotgun]: {
+    type: WeaponType.Shotgun,
+    name: "Bong Shotgun",
+    damage: 15, // per pellet
+    fireRate: 1,
+    clipSize: 6,
+    reloadTime: 2.5,
+    range: 20,
+    projectileSpeed: 25,
+    projectileSize: 0.08,
+    isAutomatic: false,
+    spread: 0.15,
+    projectileCount: 8 // antal hagel
+  },
+  
+  [WeaponType.Automatic]: {
+    type: WeaponType.Automatic,
+    name: "Vape SMG",
+    damage: 15,
+    fireRate: 8,
+    clipSize: 30,
+    reloadTime: 2.0,
+    range: 40,
+    projectileSpeed: 35,
+    projectileSize: 0.08,
+    isAutomatic: true,
+    spread: 0.05,
+    projectileCount: 1
+  },
+  
+  [WeaponType.RocketLauncher]: {
+    type: WeaponType.RocketLauncher,
+    name: "Blunt Launcher",
+    damage: 100,
+    fireRate: 0.5,
+    clipSize: 1,
+    reloadTime: 3.0,
+    range: 70,
+    projectileSpeed: 20,
+    projectileSize: 0.25,
+    isAutomatic: false,
+    spread: 0.01,
+    projectileCount: 1,
+    explosionRadius: 5 // explosionsradie
+  },
+  
+  [WeaponType.BlackHoleGun]: {
+    type: WeaponType.BlackHoleGun,
+    name: "Cosmic Bud Blaster",
+    damage: 200,
+    fireRate: 0.25,
+    clipSize: 1,
+    reloadTime: 5.0,
+    range: 100,
+    projectileSpeed: 15,
+    projectileSize: 0.3,
+    isAutomatic: false,
+    spread: 0.01,
+    projectileCount: 1,
+    explosionRadius: 8 // svart hål-radie
+  }
+};
+
+// Huvudklass för vapen
+export class Weapon {
+  type: WeaponType;
+  name: string;
+  damage: number;
+  fireRate: number;
+  clipSize: number;
+  bulletsInClip: number;
+  reloadTime: number;
+  range: number;
+  projectileSpeed: number;
+  projectileSize: number;
+  isAutomatic: boolean;
+  spread: number;
+  projectileCount: number;
+  explosionRadius?: number;
+  
+  // Tillstånd
+  lastFireTime: number = 0;
+  isReloading: boolean = false;
+  reloadStartTime: number = 0;
+  
+  constructor(type: WeaponType) {
+    const stats = WEAPON_STATS[type];
+    
+    this.type = stats.type;
+    this.name = stats.name;
+    this.damage = stats.damage;
+    this.fireRate = stats.fireRate;
+    this.clipSize = stats.clipSize;
+    this.bulletsInClip = stats.clipSize;
+    this.reloadTime = stats.reloadTime;
+    this.range = stats.range;
+    this.projectileSpeed = stats.projectileSpeed;
+    this.projectileSize = stats.projectileSize;
+    this.isAutomatic = stats.isAutomatic;
+    this.spread = stats.spread;
+    this.projectileCount = stats.projectileCount;
+    this.explosionRadius = stats.explosionRadius;
+  }
+  
+  // Kontrollera om vapnet kan skjuta baserat på fire rate och ammunition
+  canFire(currentTime: number): boolean {
+    // Kan inte skjuta om vapnet laddar om
+    if (this.isReloading) return false;
+    
+    // Kan inte skjuta om det inte finns ammunition
+    if (this.bulletsInClip <= 0) return false;
+    
+    // Kontrollera cooldown baserat på fire rate
+    const timeSinceLastFire = currentTime - this.lastFireTime;
+    const minimumTimeBetweenShots = 1000 / this.fireRate;
+    
+    return timeSinceLastFire >= minimumTimeBetweenShots;
+  }
+  
+  // Skjut vapnet och skapa projektiler
+  shoot(
+    position: Vector3, 
+    direction: Vector3, 
+    currentTime: number, 
+    damageMultiplier: number = 1.0
+  ): { position: Vector3, direction: Vector3, speed: number, size: number }[] | null {
+    // Kontrollera om vapnet kan skjuta
+    if (!this.canFire(currentTime)) return null;
+    
+    // Uppdatera tillstånd
+    this.lastFireTime = currentTime;
+    this.bulletsInClip--;
+    
+    // Skapa projektiler
+    const projectiles = [];
+    
+    // For shotguns and spread weapons, create multiple projectiles
+    for (let i = 0; i < this.projectileCount; i++) {
+      // Apply spread
+      let spreadDirection: Vector3 = [...direction];
+      
+      if (this.spread > 0) {
+        // Calculate random spread angle
+        const spreadAngleX = (Math.random() - 0.5) * 2 * this.spread;
+        const spreadAngleY = (Math.random() - 0.5) * 2 * this.spread;
+        
+        // Apply spread to direction vector
+        spreadDirection = [
+          direction[0] + spreadAngleX,
+          direction[1] + spreadAngleY,
+          direction[2]
+        ];
+        
+        // Normalize direction vector
+        const length = Math.sqrt(
+          spreadDirection[0] * spreadDirection[0] + 
+          spreadDirection[1] * spreadDirection[1] + 
+          spreadDirection[2] * spreadDirection[2]
+        );
+        
+        spreadDirection = [
+          spreadDirection[0] / length,
+          spreadDirection[1] / length,
+          spreadDirection[2] / length
+        ];
+      }
+      
+      // Create projectile with spread direction
+      projectiles.push({
+        position: [...position],
+        direction: spreadDirection,
+        speed: this.projectileSpeed,
+        size: this.projectileSize
+      });
+    }
+    
+    return projectiles;
+  }
+  
+  // Starta omladdning
+  startReload(currentTime: number): void {
+    if (this.isReloading || this.bulletsInClip === this.clipSize) return;
+    
+    this.isReloading = true;
+    this.reloadStartTime = currentTime;
+  }
+  
+  // Uppdatera omladdningsstatus
+  updateReload(currentTime: number): boolean {
+    if (!this.isReloading) return false;
+    
+    const elapsedTime = (currentTime - this.reloadStartTime) / 1000;
+    
+    if (elapsedTime >= this.reloadTime) {
+      // Omladdning klar
+      this.isReloading = false;
+      this.bulletsInClip = this.clipSize;
+      return true;
+    }
+    
+    return false;
+  }
+  
+  // Avbryt omladdning
+  cancelReload(): void {
+    this.isReloading = false;
+  }
+  
+  // Hämta laddningsförlopp (0-1)
+  getReloadProgress(currentTime: number): number {
+    if (!this.isReloading) return 0;
+    
+    const elapsedTime = (currentTime - this.reloadStartTime) / 1000;
+    return Math.min(elapsedTime / this.reloadTime, 1);
+  }
+  
+  // Hämta vapnets ikon
+  getIcon(): string {
+    switch (this.type) {
+      case WeaponType.Pistol:
+        return '/icons/pistol.png';
+      case WeaponType.Shotgun:
+        return '/icons/bong_shotgun.png';
+      case WeaponType.Automatic:
+        return '/icons/vape_smg.png';
+      case WeaponType.RocketLauncher:
+        return '/icons/blunt_launcher.png';
+      case WeaponType.BlackHoleGun:
+        return '/icons/cosmic_bud_blaster.png';
+      default:
+        return '/icons/pistol.png';
+    }
+  }
+}
+```
+
+### 6. client/src/components/game/FPSPlayer.tsx
+```typescript
+import React, { useRef, useEffect, useState, useCallback } from 'react';
+import { useFrame, useThree } from '@react-three/fiber';
+import { useGLTF } from '@react-three/drei';
+import { useKeyboardControls } from '@react-three/drei';
+import * as THREE from 'three';
+import { Controls } from '../../lib/types';
+import { usePlayerStore } from '../../lib/stores/usePlayerStore';
+
+// Förbättrad typning för FPSPlayer
+type WeaponType = 'pistol' | 'vape_smg' | 'bong_shotgun' | 'blunt_launcher';
+
+const FPSPlayer: React.FC = () => {
+  // Spelarkontroller
+  const forward = useKeyboardControls<Controls>((state) => state.forward);
+  const backward = useKeyboardControls<Controls>((state) => state.backward);
+  const leftward = useKeyboardControls<Controls>((state) => state.leftward);
+  const rightward = useKeyboardControls<Controls>((state) => state.rightward);
+  const shoot = useKeyboardControls<Controls>((state) => state.shoot);
+  
+  // Spelarstatus
+  const { 
+    position, setPosition, 
+    direction, setDirection,
+    isMoving, setIsMoving,
+    health
+  } = usePlayerStore();
+  
+  // Referenser
+  const playerRef = useRef<THREE.Group>(null);
+  const weaponRef = useRef<THREE.Group>(null);
+  const weaponModelRef = useRef<THREE.Group>(null);
+  
+  // Hämta kameran för att styra den som FPS
+  const { camera } = useThree();
+  
+  // Vapenmodeller
+  const { scene: pistolScene } = useGLTF('/models/pistol.glb', true);
+  const { scene: bluntLauncherScene } = useGLTF('/models/blunt_launcher.glb', true);
+  const { scene: vapeSmgScene } = useGLTF('/models/vape_smg.glb', true);
+  const { scene: bongShotgunScene } = useGLTF('/models/bong_shotgun.glb', true);
+  
+  // FPS händer modell
+  const { scene: handsScene } = useGLTF('/models/fps_hands.glb', true);
+  
+  // Vapen state med alla vapen
+  const [currentWeapon, setCurrentWeapon] = useState<WeaponType>('pistol');
+  const [weaponSwitchTime, setWeaponSwitchTime] = useState<number>(0);
+  
+  // Bob-effekt för att simulera gång
+  const bobFactor = useRef(0);
+  const lastBobPosition = useRef(0);
+  const weaponModelLocal = useRef<THREE.Group | null>(null);
+  const handsModelRef = useRef<THREE.Group | null>(null);
+  
+  // Ladda vapnet baserat på currentWeapon
+  const loadWeapon = useCallback(() => {
+    if (!weaponRef.current) return;
+    
+    // Rensa tidigare barn
+    while (weaponRef.current.children.length > 0) {
+      weaponRef.current.remove(weaponRef.current.children[0]);
+    }
+    
+    // Välja rätt vapen baserat på currentWeapon
+    let weaponToLoad;
+    let weaponPosition: [number, number, number] = [0.3, -0.3, -0.5];
+    let weaponRotation: [number, number, number] = [0, Math.PI, 0];
+    let weaponScale: [number, number, number] = [0.2, 0.2, 0.2];
+    
+    switch (currentWeapon) {
+      case 'blunt_launcher':
+        weaponToLoad = bluntLauncherScene;
+        weaponPosition = [0.25, -0.3, -0.6]; // Lite annorlunda position
+        weaponScale = [0.15, 0.15, 0.15]; // Större vapen, mindre skala
+        break;
+      case 'vape_smg':
+        weaponToLoad = vapeSmgScene;
+        weaponPosition = [0.3, -0.25, -0.5]; // Högre position för SMG
+        break;
+      case 'bong_shotgun':
+        weaponToLoad = bongShotgunScene;
+        weaponPosition = [0.3, -0.35, -0.5]; // Lägre position för hagelgevär
+        weaponScale = [0.18, 0.18, 0.18]; // Större vapen
+        break;
+      case 'pistol':
+      default:
+        weaponToLoad = pistolScene;
+        break;
+    }
+    
+    if (weaponToLoad) {
+      // Klona vapnet och lägg till det
+      const weaponModel = weaponToLoad.clone();
+      weaponModel.position.set(weaponPosition[0], weaponPosition[1], weaponPosition[2]);
+      weaponModel.rotation.set(weaponRotation[0], weaponRotation[1], weaponRotation[2]);
+      weaponModel.scale.set(weaponScale[0], weaponScale[1], weaponScale[2]);
+      
+      weaponRef.current.add(weaponModel);
+      weaponModelLocal.current = weaponModel;
+    }
+    
+    // Lägg även till händerna om de finns
+    if (handsScene) {
+      const handsModel = handsScene.clone();
+      handsModel.position.set(0.2, -0.4, -0.6); // Placera händerna under vapnet
+      handsModel.rotation.set(0.2, Math.PI, 0); // Rotera händerna så de pekar framåt
+      handsModel.scale.set(0.15, 0.15, 0.15); // Skala händerna
+      
+      weaponRef.current.add(handsModel);
+      handsModelRef.current = handsModel;
+    }
+    
+  }, [currentWeapon, pistolScene, bluntLauncherScene, vapeSmgScene, bongShotgunScene, handsScene]);
+  
+  // Lyssna efter vapenbyte (E-tangenten)
+  const weaponSwitch = useKeyboardControls<Controls>((state) => state.weaponSwitch);
+  
+  // Hantera vapenbyte
+  useEffect(() => {
+    const handleWeaponSwitch = () => {
+      const now = Date.now();
+      
+      // Förhindra för snabba byten (cooldown 500ms)
+      if (now - weaponSwitchTime < 500) return;
+      
+      // Byt vapen i en bestämd ordning
+      setCurrentWeapon(currentWeapon => {
+        switch (currentWeapon) {
+          case 'pistol': return 'vape_smg';
+          case 'vape_smg': return 'bong_shotgun';
+          case 'bong_shotgun': return 'blunt_launcher';
+          case 'blunt_launcher': return 'pistol';
+          default: return 'pistol';
+        }
+      });
+      
+      setWeaponSwitchTime(now);
+    };
+    
+    if (weaponSwitch) {
+      handleWeaponSwitch();
+    }
+  }, [weaponSwitch, weaponSwitchTime]);
+  
+  // Ladda vapnet när currentWeapon ändras
+  useEffect(() => {
+    loadWeapon();
+  }, [currentWeapon, loadWeapon]);
+
+  // Huvuduppdateringsloop
+  useFrame((state, delta) => {
+    if (!playerRef.current) return;
+    
+    // Rörelsehastighet
+    const speed = 5 * delta;
+    
+    // Beräkna rörelseriktning baserat på kamerarotation
+    let moveX = 0;
+    let moveZ = 0;
+    
+    // Rörelse i kamerariktningen
+    if (forward) {
+      moveZ = -Math.cos(camera.rotation.y);
+      moveX = -Math.sin(camera.rotation.y);
+    }
+    if (backward) {
+      moveZ = Math.cos(camera.rotation.y);
+      moveX = Math.sin(camera.rotation.y);
+    }
+    
+    // Strafing (sida-till-sida)
+    if (leftward) {
+      moveZ = -Math.sin(camera.rotation.y);
+      moveX = Math.cos(camera.rotation.y);
+    }
+    if (rightward) {
+      moveZ = Math.sin(camera.rotation.y);
+      moveX = -Math.cos(camera.rotation.y);
+    }
+    
+    // Kontrollera om spelaren rör sig
+    const moving = moveX !== 0 || moveZ !== 0;
+    
+    // Uppdatera isMoving-state för animationshantering
+    if (moving !== isMoving) {
+      setIsMoving(moving);
+    }
+    
+    // Normalisera för diagonal rörelse
+    if (moveX !== 0 && moveZ !== 0) {
+      moveX *= 0.7071; // 1 / sqrt(2)
+      moveZ *= 0.7071;
+    }
+    
+    // Uppdatera spelarens position om spelaren rör sig
+    if (moving) {
+      // Uppdatera position
+      const newX = position[0] + moveX * speed;
+      const newZ = position[2] + moveZ * speed;
+      
+      // Begränsa rörelse inom spelområdet
+      const boundedX = Math.max(-50, Math.min(50, newX));
+      const boundedZ = Math.max(-50, Math.min(50, newZ));
+      
+      // Sätt ny position
+      setPosition([boundedX, position[1], boundedZ]);
+      
+      // Uppdatera riktning om spelaren rör sig
+      if (moveX !== 0 || moveZ !== 0) {
+        setDirection([moveX, 0, moveZ]);
+      }
+      
+      // Beräkna bobbing-effekt för att simulera gång
+      bobFactor.current += delta * 10; // Öka med tiden
+      lastBobPosition.current = Math.sin(bobFactor.current) * 0.05; // Sinusvåg för bobbing
+    } else {
+      // Gradvis återgå till normal position när man står still
+      bobFactor.current += delta; // Fortsätt räkna för jämn övergång
+      lastBobPosition.current *= 0.8; // Dämpa rörelsen
+    }
+    
+    // Uppdatera position för spelaren (och kameran följer med)
+    playerRef.current.position.set(position[0], position[1], position[2]);
+    camera.position.set(position[0], position[1] + 1.7, position[2]); // Ögonhöjd
+    
+    // Uppdatera vapenposition med bob-effekt
+    if (weaponModelLocal.current && moving) {
+      weaponModelLocal.current.position.y = -0.3 + lastBobPosition.current;
+      weaponModelLocal.current.position.x = 0.3 + lastBobPosition.current * 0.1;
+    }
+    
+    // Skjuteffekt när man klickar
+    if (shoot && weaponModelLocal.current) {
+      // Rekylfunktion för vapen
+      weaponModelLocal.current.position.z = -0.4; // Flytta bakåt för rekyl
+      weaponModelLocal.current.rotation.x = -0.1; // Rotera uppåt för rekyl
+      
+      // Återställ vapnets position efter ett kort tag
+      setTimeout(() => {
+        if (weaponModelLocal.current) {
+          weaponModelLocal.current.position.z = -0.5; // Återgå till normalposition
+          weaponModelLocal.current.rotation.x = 0; // Återgå till normalrotation
+        }
+      }, 100);
+    }
+  });
+  
+  return (
+    <group ref={playerRef} position={[position[0], position[1], position[2]]}>
+      {/* FPS-vapnet som syns i kameran */}
+      <group 
+        ref={weaponRef} 
+        position={[0, 0, 0]} 
+        rotation={[0, 0, 0]}
+      />
+      
+      {/* Ljuseffekt för vapnet */}
+      <pointLight 
+        color="#78ff00" // Grön färg för cannabis-tema
+        intensity={2} 
+        distance={2} 
+        position={[0.3, -0.2, -0.5]} 
+      />
+      
+      {/* HUD-element skulle renderas separat i en overlay */}
+    </group>
+  );
+};
+
+export default FPSPlayer;
+```
+
+### 7. client/src/components/game/DarkEnvironment.tsx
+```typescript
+import React, { useRef, useMemo } from 'react';
+import { useFrame } from '@react-three/fiber';
+import * as THREE from 'three';
+
+const DarkEnvironment: React.FC = () => {
+  // Referenser till miljöelement
+  const roadRef = useRef<THREE.Mesh>(null);
+  const fogRef = useRef<THREE.Fog | null>(null);
+
+  // Vi använder inga texturer direkt eftersom vi genererar en mer direkt miljö
+  // Detta undviker fel med saknade texturfiler
+  interface TextureProps {
+    roughnessMap?: THREE.Texture;
+    normalMap?: THREE.Texture;
+  }
+  
+  const textureProps: TextureProps = {};
+  
+  // Cannabis-inspirerade färginställningar
+  const colors = useMemo(() => ({
+    sky: new THREE.Color('#1a0b0b'),
+    ground: new THREE.Color('#1b1b1b'),
+    fog: new THREE.Color('#050505'),
+    accent: new THREE.Color('#2a6b00'), // Cannabisgrön accent
+  }), []);
+  
+  // Skapa en gridmaterial för vägen
+  const roadMaterial = useMemo(() => {
+    return new THREE.MeshStandardMaterial({
+      color: '#202020',
+      roughness: 0.9,
+      metalness: 0.1,
+      // Använd texturer om de finns tillgängliga
+      ...(textureProps.roughnessMap ? { roughnessMap: textureProps.roughnessMap } : {}),
+      ...(textureProps.normalMap ? { normalMap: textureProps.normalMap } : {})
+    });
+  }, [textureProps]);
+  
+  // Skapa material för himlen
+  const skyMaterial = useMemo(() => {
+    return new THREE.MeshBasicMaterial({ 
+      color: colors.sky,
+      side: THREE.BackSide 
+    });
+  }, [colors]);
+  
+  // Partikeleffekter för cannabis-rök
+  const smokeParticles = useMemo(() => {
+    const particles = [];
+    const particleCount = 20;
+    
+    for (let i = 0; i < particleCount; i++) {
+      const x = Math.random() * 100 - 50;
+      const y = Math.random() * 2 + 0.2;
+      const z = Math.random() * 100 - 50;
+      
+      particles.push({
+        position: [x, y, z] as [number, number, number],
+        scale: Math.random() * 2 + 1,
+        speed: Math.random() * 0.02 + 0.005,
+      });
+    }
+    
+    return particles;
+  }, []);
+  
+  return (
+    <group>
+      {/* Himmel */}
+      <mesh position={[0, 0, 0]} scale={[500, 500, 500]}>
+        <sphereGeometry args={[1, 32, 32]} />
+        <meshBasicMaterial color={colors.sky} side={THREE.BackSide} />
+      </mesh>
+      
+      {/* Väg/terräng */}
+      <mesh 
+        ref={roadRef} 
+        rotation={[-Math.PI / 2, 0, 0]} 
+        position={[0, -0.1, 0]} 
+        receiveShadow
+      >
+        <planeGeometry args={[200, 200, 128, 128]} />
+        <meshStandardMaterial 
+          color="#202020"
+          roughness={0.9}
+          metalness={0.1}
+          {...(textureProps.roughnessMap ? { roughnessMap: textureProps.roughnessMap } : {})}
+          {...(textureProps.normalMap ? { normalMap: textureProps.normalMap } : {})}
+        />
+      </mesh>
+      
+      {/* Cannabis-inspirerade dekorationer */}
+      {/* Växter som påminner om cannabis vid sidan av vägen */}
+      {Array.from({ length: 15 }).map((_, i) => (
+        <group 
+          key={`plant-${i}`} 
+          position={[
+            Math.sin(i / 15 * Math.PI * 2) * 20, 
+            0, 
+            Math.cos(i / 15 * Math.PI * 2) * 20
+          ]}
+        >
+          {/* Stam/stängel */}
+          <mesh position={[0, 1, 0]} castShadow>
+            <cylinderGeometry args={[0.1, 0.2, 2, 8]} />
+            <meshStandardMaterial color="#2d3b0e" roughness={0.8} />
+          </mesh>
+          
+          {/* Blad */}
+          {Array.from({ length: 5 }).map((_, j) => (
+            <mesh 
+              key={`leaf-${j}`} 
+              position={[
+                Math.sin(j / 5 * Math.PI * 2) * 0.5, 
+                1 + j * 0.3, 
+                Math.cos(j / 5 * Math.PI * 2) * 0.5
+              ]} 
+              rotation={[0, j / 5 * Math.PI * 2, Math.PI / 4]}
+              castShadow
+            >
+              <boxGeometry args={[0.6, 0.05, 0.2]} />
+              <meshStandardMaterial color="#4d7b00" roughness={0.6} metalness={0.1} />
+            </mesh>
+          ))}
+        </group>
+      ))}
+      
+      {/* Röda ögon i mörkret (som i referensbilden) */}
+      {Array.from({ length: 8 }).map((_, i) => (
+        <group 
+          key={`eyes-${i}`} 
+          position={[
+            Math.sin(i / 8 * Math.PI * 2) * 30 + Math.random() * 10, 
+            Math.random() * 0.5 + 1.5, 
+            Math.cos(i / 8 * Math.PI * 2) * 30 + Math.random() * 10
+          ]}
+        >
+          <pointLight color="#ff0000" intensity={1} distance={5} />
+          <mesh>
+            <sphereGeometry args={[0.1, 16, 16]} />
+            <meshBasicMaterial color="#ff0000" />
+          </mesh>
+          <mesh position={[0.3, 0, 0]}>
+            <sphereGeometry args={[0.1, 16, 16]} />
+            <meshBasicMaterial color="#ff0000" />
+          </mesh>
+        </group>
+      ))}
+      
+      {/* Rök/dimma partiklar som svävar runt */}
+      {smokeParticles.map((particle, i) => (
+        <mesh 
+          key={`smoke-${i}`} 
+          position={[particle.position[0], particle.position[1], particle.position[2]]} 
+          scale={[particle.scale, particle.scale, particle.scale]}
+        >
+          <sphereGeometry args={[0.5, 8, 8]} />
+          <meshBasicMaterial 
+            color="#2a6b00" 
+            transparent={true} 
+            opacity={0.2} 
+          />
+        </mesh>
+      ))}
+      
+      {/* Dimma inställd i scenen */}
+      <fog attach="fog" args={[colors.fog.getHex(), 10, 60]} ref={fogRef} />
+      
+      {/* Atmosfäriska ljus - blodröd måne */}
+      <directionalLight position={[-50, 20, -50]} color="#760000" intensity={0.2} />
+      
+      {/* Spöklik belysning underifrån */}
+      <spotLight 
+        position={[0, -1, 0]} 
+        color="#2a6b00" 
+        intensity={0.5} 
+        angle={0.5} 
+        penumbra={0.5} 
+        decay={2} 
+      />
+    </group>
+  );
+};
+
+export default DarkEnvironment;
+```
+
+### 8. client/src/components/game/ZombieEnemy.tsx
+```typescript
+import React, { useRef, useEffect, useState } from 'react';
+import { useFrame } from '@react-three/fiber';
+import { useGLTF } from '@react-three/drei';
+import * as THREE from 'three';
+import { Vector3 } from '../../lib/types';
+import { EnemyType } from '../../lib/types';
+import { Enemy } from '../../classes/Enemy';
+
+interface ZombieEnemyProps {
+  enemy: Enemy;
+  playerPosition: Vector3;
+  onDamagePlayer: () => void;
+  onDeath: (scoreValue: number) => void;
+}
+
+const ZombieEnemy: React.FC<ZombieEnemyProps> = ({ 
+  enemy, 
+  playerPosition, 
+  onDamagePlayer,
+  onDeath
+}) => {
+  // Referens till fiendegruppen
+  const enemyRef = useRef<THREE.Group>(null);
+  
+  // State för fiendestatus
+  const [blinkEffect, setBlinkEffect] = useState(false);
+  
+  // Fiendtypsspecifika modeller
+  const loadEnemyModel = () => {
+    try {
+      switch(enemy.type) {
+        case EnemyType.Normal: // Stoned Shuffler
+          return useGLTF('/models/stoned_shuffler.glb');
+        case EnemyType.Fast: // Paranoid Sprinter
+          return useGLTF('/models/paranoid_sprinter.glb');
+        case EnemyType.Boss: // Boss Mutant
+          return useGLTF('/models/boss_mutant.glb');
+        default:
+          console.warn("Kunde inte ladda modell för " + enemy.type + ":", enemy);
+          return null;
+      }
+    } catch (error) {
+      console.warn("Kunde inte ladda modell för " + enemy.type + ":", error);
+      return null;
+    }
+  };
+  
+  // Försök ladda fiendmodell, fallback till primitiv
+  const enemyModel = loadEnemyModel();
+  
+  // Effekt när fienden tar skada
+  useEffect(() => {
+    if (blinkEffect) {
+      const timer = setTimeout(() => {
+        setBlinkEffect(false);
+      }, 150);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [blinkEffect]);
+
+  // Huvuduppdateringsloop
+  useFrame((_, delta) => {
+    if (!enemyRef.current) return;
+    
+    // Uppdatera position baserat på fiendens logik
+    const newPosition = enemy.moveTowardsPlayer(playerPosition, delta);
+    enemyRef.current.position.set(newPosition[0], newPosition[1], newPosition[2]);
+    
+    // Rotera fienden mot spelaren
+    if (playerPosition) {
+      const direction = [
+        playerPosition[0] - enemy.position[0],
+        0,
+        playerPosition[2] - enemy.position[2]
+      ];
+      
+      // Beräkna rotationen baserat på riktningen
+      if (direction[0] !== 0 || direction[2] !== 0) {
+        const angle = Math.atan2(direction[0], direction[2]);
+        enemyRef.current.rotation.y = angle;
+      }
+    }
+    
+    // Kontrollera om fienden kan attackera spelaren
+    const now = Date.now();
+    if (enemy.canAttack(now)) {
+      // Beräkna avståndet till spelaren
+      const distanceToPlayer = Math.sqrt(
+        Math.pow(playerPosition[0] - enemy.position[0], 2) +
+        Math.pow(playerPosition[2] - enemy.position[2], 2)
+      );
+      
+      // Attackera om spelaren är inom räckhåll
+      if (distanceToPlayer <= enemy.attackRange) {
+        const damage = enemy.attack(now);
+        if (damage > 0) {
+          onDamagePlayer();
+        }
+      }
+    }
+  });
+  
+  // Hantera skada på fienden
+  const handleDamage = (amount: number) => {
+    setBlinkEffect(true);
+    const isDead = enemy.takeDamage(amount);
+    
+    if (isDead) {
+      // Hantera död (explosion, poäng, etc.)
+      if (enemy.type === EnemyType.Explosive) {
+        const explosion = enemy.explode();
+        if (explosion) {
+          // Här skulle vi hantera explosionen och skada inom radien
+          console.log(`Explosion med radie ${explosion.radius} och skada ${explosion.damage}`);
+        }
+      }
+      
+      // Ge poäng till spelaren
+      onDeath(enemy.scoreValue);
+    }
+  };
+  
+  // Specialeffekter baserat på fiendtyp
+  const renderSpecialEffects = () => {
+    switch(enemy.type) {
+      case EnemyType.Stealth:
+        // Halvtransparent för stealth-fiender
+        return (
+          <meshStandardMaterial 
+            color={enemy.color} 
+            transparent={true} 
+            opacity={0.5} 
+          />
+        );
+      case EnemyType.Explosive:
+        // Pulserande rött ljus för explosiva fiender
+        return (
+          <pointLight 
+            color="red" 
+            intensity={1.5} 
+            distance={2}
+            position={[0, 1, 0]}
+          />
+        );
+      case EnemyType.Boss:
+        // Neongrön aura för boss-fiender
+        return (
+          <>
+            <pointLight 
+              color="#78ff00" 
+              intensity={2} 
+              distance={5}
+              position={[0, 2, 0]}
+            />
+            <mesh position={[0, 3, 0]}>
+              <sphereGeometry args={[0.5, 16, 16]} />
+              <meshBasicMaterial color="#78ff00" transparent opacity={0.7} />
+            </mesh>
+          </>
+        );
+      default:
+        return null;
+    }
+  };
+  
+  return (
+    <group 
+      ref={enemyRef} 
+      position={[enemy.position[0], enemy.position[1], enemy.position[2]]}
+      userData={{ enemyId: enemy.id, handleDamage }}
+    >
+      {/* Om vi har en modell, använd den, annars fallback till primitiver */}
+      {enemyModel ? (
+        <primitive 
+          object={enemyModel.scene.clone()} 
+          scale={[0.5, 0.5, 0.5]} 
+          position={[0, 0, 0]}
+        />
+      ) : (
+        // Fallback-primitiver med olika utseende baserat på fiendtyp
+        <>
+          {/* Kropp */}
+          <mesh castShadow receiveShadow>
+            {enemy.type === EnemyType.Boss ? (
+              <boxGeometry args={[1.5, 2.5, 1.5]} />
+            ) : enemy.type === EnemyType.Fast ? (
+              <boxGeometry args={[0.8, 1.8, 0.8]} />
+            ) : (
+              <boxGeometry args={[1, 2, 1]} />
+            )}
+            <meshStandardMaterial 
+              color={blinkEffect ? '#ffffff' : enemy.color} 
+              roughness={0.7}
+              metalness={0.2}
+            />
+          </mesh>
+          
+          {/* Ögon */}
+          <mesh position={[0.2, 1.6, 0.5]}>
+            <sphereGeometry args={[0.1, 16, 16]} />
+            <meshBasicMaterial color="red" />
+          </mesh>
+          <mesh position={[-0.2, 1.6, 0.5]}>
+            <sphereGeometry args={[0.1, 16, 16]} />
+            <meshBasicMaterial color="red" />
+          </mesh>
+          
+          {/* Cannabis-detaljer för 'Stoned Shuffler' */}
+          {enemy.type === EnemyType.Normal && (
+            <mesh position={[0, 1.8, 0]}>
+              <boxGeometry args={[0.4, 0.2, 0.4]} />
+              <meshStandardMaterial color="#4d7b00" roughness={0.6} metalness={0.1} />
+            </mesh>
+          )}
+          
+          {/* Hoodie för 'Paranoid Sprinter' */}
+          {enemy.type === EnemyType.Fast && (
+            <mesh position={[0, 1.9, 0]} rotation={[0.2, 0, 0]}>
+              <coneGeometry args={[0.5, 0.7, 32]} />
+              <meshStandardMaterial color="#333333" roughness={0.8} metalness={0.1} />
+            </mesh>
+          )}
+          
+          {/* Cannabis-växt för 'Boss Mutant' */}
+          {enemy.type === EnemyType.Boss && (
+            <group position={[0, 2.5, 0]}>
+              <mesh>
+                <cylinderGeometry args={[0.1, 0.2, 1, 8]} />
+                <meshStandardMaterial color="#2d3b0e" roughness={0.8} />
+              </mesh>
+              
+              {/* Blad */}
+              {Array.from({ length: 5 }).map((_, j) => (
+                <mesh 
+                  key={`leaf-${j}`} 
+                  position={[
+                    Math.sin(j / 5 * Math.PI * 2) * 0.5, 
+                    0.3 + j * 0.1, 
+                    Math.cos(j / 5 * Math.PI * 2) * 0.5
+                  ]} 
+                  rotation={[0, j / 5 * Math.PI * 2, Math.PI / 4]}
+                >
+                  <boxGeometry args={[0.5, 0.05, 0.2]} />
+                  <meshStandardMaterial color="#4d7b00" roughness={0.6} metalness={0.1} />
+                </mesh>
+              ))}
+            </group>
+          )}
+        </>
+      )}
+      
+      {/* Specialeffekter baserat på fiendtyp */}
+      {renderSpecialEffects()}
+      
+      {/* Hälsoindikator över huvudet */}
+      <group position={[0, 2.5, 0]}>
+        <mesh position={[0, 0, 0]} rotation={[0, 0, 0]} scale={[1, 0.1, 0.1]}>
+          <boxGeometry />
+          <meshBasicMaterial color="#333333" />
+        </mesh>
+        <mesh 
+          position={[((enemy.health / 100) - 1) / 2, 0, 0]} 
+          rotation={[0, 0, 0]} 
+          scale={[enemy.health / 100, 0.08, 0.08]}
+        >
+          <boxGeometry />
+          <meshBasicMaterial color={enemy.health > 50 ? '#00ff00' : enemy.health > 20 ? '#ffff00' : '#ff0000'} />
+        </mesh>
+      </group>
+    </group>
+  );
+};
+
+export default ZombieEnemy;
+```
+
+### 9. client/src/components/ui/FPSOverlay.tsx
+Denna komponent är mycket omfattande med UI-element, joystick-kontroller, skadeeffekter osv. Se den kompletta versionen i projektdokumentationen.
+
+### 10. client/src/hooks/use-is-mobile.tsx
+```typescript
+import { useState, useEffect } from 'react';
+
+export function useIsMobile() {
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    // Funktion för att kontrollera om enheten är mobil
+    const checkMobile = () => {
+      const userAgent = navigator.userAgent.toLowerCase();
+      const mobileRegex = /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i;
+      
+      // Kontrollera användaragent
+      const isMobileDevice = mobileRegex.test(userAgent);
+      
+      // Kontrollera fönsterstorlek som backup
+      const isMobileSize = window.innerWidth < 768;
+      
+      // Kontrollera touch-funktioner
+      const hasTouchScreen = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+      
+      setIsMobile(isMobileDevice || (isMobileSize && hasTouchScreen));
+    };
+
+    // Kör kontrollen direkt
+    checkMobile();
+    
+    // Lyssna på storleksändringar
+    window.addEventListener('resize', checkMobile);
+    
+    // Rensa lyssnare när komponenten unmountas
+    return () => {
+      window.removeEventListener('resize', checkMobile);
+    };
+  }, []);
+
+  return isMobile;
+}
+```
+
+### 11. client/src/App.tsx
+```typescript
+import React, { useState, Suspense } from 'react';
+import { Canvas } from '@react-three/fiber';
+import { OrbitControls, KeyboardControls } from '@react-three/drei';
+import { Controls } from './lib/types';
+import FPSPlayer from './components/game/FPSPlayer';
+import DarkEnvironment from './components/game/DarkEnvironment';
+import DownloadButton from './components/ui/DownloadButton';
+
+// Typer för spellägen
+type ExtendedGamePhase = "intro" | "menu" | "ready" | "playing" | "ended";
+
+function App() {
+  // State för spelläge
+  const [gamePhase, setGamePhase] = useState<ExtendedGamePhase>("intro");
+  
+  // Visa projektdokumentation-nedladdning i intro-läge
+  const showDocumentation = gamePhase === "intro" || gamePhase === "menu";
+  
+  // Tangentbordskonfiguration
+  const keyMap = [
+    { name: Controls.forward, keys: ['ArrowUp', 'KeyW'] },
+    { name: Controls.backward, keys: ['ArrowDown', 'KeyS'] },
+    { name: Controls.leftward, keys: ['ArrowLeft', 'KeyA'] },
+    { name: Controls.rightward, keys: ['ArrowRight', 'KeyD'] },
+    { name: Controls.shoot, keys: ['Space'] },
+    { name: Controls.reload, keys: ['KeyR'] },
+    { name: Controls.weaponSwitch, keys: ['KeyE'] }
+  ];
+  
+  // Starta spelet
+  const handleStartGame = () => {
+    setGamePhase("playing");
+  };
+  
+  return (
+    <div style={{ width: '100vw', height: '100vh', overflow: 'hidden', position: 'relative' }}>
+      {/* Nedladdningsknapp för dokumentation */}
+      {showDocumentation && (
+        <div style={{ 
+          position: 'absolute', 
+          top: '10px', 
+          right: '10px', 
+          zIndex: 1000,
+          backgroundColor: 'rgba(0,0,0,0.7)',
+          padding: '10px',
+          borderRadius: '5px'
+        }}>
+          <DownloadButton 
+            buttonText="Ladda ner projektdokumentation"
+          />
+        </div>
+      )}
+      
+      {/* Huvuddelen för Three.js-renderingen */}
+      <KeyboardControls map={keyMap}>
+        <Canvas 
+          shadows 
+          gl={{ antialias: true }} 
+          camera={{ position: [0, 1.7, 5], fov: 75 }}
+          style={{ background: '#050505' }}
+        >
+          <fog attach="fog" args={['#050505', 10, 50]} />
+          
+          {gamePhase === "playing" ? (
+            <Suspense fallback={null}>
+              {/* Miljö */}
+              <DarkEnvironment />
+              
+              {/* Spelare */}
+              <FPSPlayer />
+              
+              {/* Ambient ljus */}
+              <ambientLight intensity={0.2} />
+              
+              {/* Huvudljus (måne) */}
+              <directionalLight 
+                position={[-10, 15, -10]} 
+                intensity={0.1}
+                castShadow
+                shadow-mapSize={[2048, 2048]}
+                shadow-camera-left={-20}
+                shadow-camera-right={20}
+                shadow-camera-top={20}
+                shadow-camera-bottom={-20}
+              />
+              
+              {/* Atmosfärisk dimma */}
+              <fog attach="fog" args={['#050505', 10, 50]} />
+            </Suspense>
+          ) : (
+            // Startskärm
+            <Suspense fallback={null}>
+              <ambientLight intensity={0.5} />
+              <mesh position={[0, 0, -5]}>
+                <planeGeometry args={[20, 10]} />
+                <meshBasicMaterial color="#111" />
+              </mesh>
+            </Suspense>
+          )}
+        </Canvas>
+      </KeyboardControls>
+      
+      {/* Startskärm UI */}
+      {gamePhase === "intro" && (
+        <div style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'center',
+          alignItems: 'center',
+          color: '#fff',
+          backgroundColor: 'rgba(0, 0, 0, 0.7)',
+          zIndex: 10
+        }}>
+          <h1 style={{ 
+            fontSize: '48px', 
+            color: '#78ff00',
+            textShadow: '0 0 10px rgba(120, 255, 0, 0.5)',
+            marginBottom: '20px',
+            fontFamily: 'monospace'
+          }}>
+            BATTLEFIELD FRENZY
+            <br />
+            STONER EDITION
+          </h1>
+          <p style={{ 
+            maxWidth: '600px', 
+            textAlign: 'center',
+            marginBottom: '30px',
+            fontFamily: 'monospace',
+            fontSize: '16px'
+          }}>
+            Ett förstapersonsskjutspel med cannabis-tema i en mörk, post-apokalyptisk värld.
+            Bekämpa vågor av zombies med dina cannabis-inspirerade vapen!
+          </p>
+          <button 
+            onClick={handleStartGame}
+            style={{
+              padding: '15px 30px',
+              backgroundColor: '#4CAF50',
+              color: 'white',
+              fontSize: '18px',
+              border: 'none',
+              borderRadius: '5px',
+              cursor: 'pointer',
+              boxShadow: '0 0 20px rgba(120, 255, 0, 0.5)',
+              fontFamily: 'monospace'
+            }}
+          >
+            STARTA SPELET
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default App;
+```
+
+### 12. server/routes.ts
+```typescript
+import type { Express } from "express";
+import { createServer, type Server } from "http";
+import { storage } from "./storage";
+import path from "path";
+import fs from "fs";
+
+export async function registerRoutes(app: Express): Promise<Server> {
+  // put application routes here
+  // prefix all routes with /api
+
+  // Endpoint för att ladda ner projektdokumentation
+  app.get("/api/download/documentation", (_req, res) => {
+    const filePath = path.resolve(process.cwd(), "projektdokumentation.txt");
+    
+    // Kontrollera om filen existerar
+    if (fs.existsSync(filePath)) {
+      res.setHeader('Content-Type', 'text/plain');
+      res.setHeader('Content-Disposition', 'attachment; filename=battlefield_frenzy_documentation.txt');
+      
+      // Skicka filen som nedladdning
+      fs.createReadStream(filePath).pipe(res);
+    } else {
+      res.status(404).send("Dokumentationsfilen kunde inte hittas");
+    }
+  });
+
+  // use storage to perform CRUD operations on the storage interface
+  // e.g. storage.insertUser(user) or storage.getUserByUsername(username)
+
+  const httpServer = createServer(app);
+
+  return httpServer;
+}
+```
+
+## DETALJERADE 3D-MODELLER
+
+### 1. street_scene.glb
+En post-apokalyptisk gatumiljö med neonskyltar, inklusive en cannabisbutik med grönt lysande skylt. Modellen innehåller skadade byggnader, övergivna bilar och väggar med graffiti av cannabissymboler. Scenen har en dyster känsla med gröna och lila färgtoner.
+
+### 2. cannabis_plant.glb
+En fullt utvecklad cannabisväxt med detaljerade blad, stjälkar och knoppar. Växten är realistisk men stiliserad med en svag glödeffekt runt knopparna. Modellen är optimerad för mobilspel men tillräckligt detaljerad för att vara igenkännbar som en cannabisväxt.
+
+### 3. health_pack.glb
+Ett hälsopaket format som en cannabis-ätbar - specifikt en grön gummibjörn med ett rött kors-emblem. Modellen har en svag glödeffekt och en cartoonaktig men realistisk stil, lämplig för en post-apokalyptisk spelmiljö.
+
+### 4. ammo_box.glb
+En ammunitionslåda som liknar ett paket rullpapper med cannabisblad-dekorationer. Lådan är lite öppen med några papper synliga, och har en metallisk ammunitionslåda-ram runt om för att ge en post-apokalyptisk känsla. Modellen innehåller några små kulliknande objekt som liknar joints.
+
+### 5. power_up.glb
+Ett svävande, roterande cannabisblad med en ljusgrön aura. Bladet är detaljerat men stiliserat, med en subtil partikeleffekt runt det. Modellen är designad för att sväva och rotera på plats som en samlingsbar power-up i spelvärlden.
+
+### 6. fps_hands.glb
+Förstapersons-händer för att hålla vapnen i FPS-vy.
+
+### 7. pistol.glb, blunt_launcher.glb, vape_smg.glb, bong_shotgun.glb
+De cannabis-tematiserade vapnen enligt beskrivningen i konceptet.
+
+## MOBIL OPTIMERING
+
+1. Använder `useIsMobile` hook för att detektera mobila enheter
+2. Anpassar UI-layout baserat på skärmstorlek
+3. Virtuell joystick för rörelse på mobilenheter
+4. Touch-baserad sikte för styrning av kamera
+5. Responsiv design för både porträtt och landskapsläge
+6. Varning när enheten är i porträttläge för bättre spelupplevelse
+7. Touch-optimerade knappar för skjutning, omladdning och vapenbyte
